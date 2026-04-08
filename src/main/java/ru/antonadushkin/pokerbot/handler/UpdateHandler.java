@@ -35,6 +35,11 @@ public class UpdateHandler {
                 case "CLOSE_REG":
                     gameService.closeRegistration(update, sender);
                     break;
+
+                case "REBUY":
+                    gameService.rebuyByButton(update, sender);
+                    break;
+
             }
 
             return;

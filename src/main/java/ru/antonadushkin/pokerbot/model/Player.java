@@ -24,4 +24,8 @@ public class Player {
         return money;
     }
 
+    public void addMoney(int amount) {
+        this.money += amount;
+    }
+
 }

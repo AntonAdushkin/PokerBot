@@ -22,7 +22,7 @@ import java.util.Map;
 public class GameService {
 
     private final Map<Long, Game> games = new HashMap<>();
-    private final Map<Long, Long> pendingPlayers = new HashMap<>();
+    private final Map<Long, PendingMoneyAction> pendingMoneyActions = new HashMap<>();
     private final Map<Long, Integer> gameMessages = new HashMap<>();
 
     // старт игры
@@ -84,7 +84,7 @@ public class GameService {
             return;
         }
 
-        pendingPlayers.put(userId, chatId);
+        pendingMoneyActions.put(userId, new PendingMoneyAction(chatId, MoneyActionType.JOIN));
 
         sendMessage(sender, chatId,
                 "💰 " + username + ", введи сумму входа (в рублях):");
@@ -96,11 +96,12 @@ public class GameService {
 
         Long userId = update.getMessage().getFrom().getId();
 
-        if (!pendingPlayers.containsKey(userId)) {
+        if (!pendingMoneyActions.containsKey(userId)) {
             return;
         }
 
-        Long chatId = pendingPlayers.get(userId);
+        PendingMoneyAction pendingMoneyAction = pendingMoneyActions.get(userId);
+        Long chatId = pendingMoneyAction.chatId();
         String text = update.getMessage().getText();
 
         int amount;
@@ -117,10 +118,32 @@ public class GameService {
         Game game = games.get(chatId);
         String username = getUsername(update.getMessage().getFrom());
 
-        Player player = new Player(userId, username, amount);
-        game.addPlayer(player);
+        if (game == null) {
+            pendingMoneyActions.remove(userId);
+            sendMessage(sender, chatId, "❌ Игра не найдена.");
+            return;
+        }
 
-        pendingPlayers.remove(userId);
+        if (pendingMoneyAction.type() == MoneyActionType.JOIN) {
+            Player player = new Player(userId, username, amount);
+            game.addPlayer(player);
+        } else {
+            Player player = game.findPlayer(userId);
+
+            if (player == null) {
+                pendingMoneyActions.remove(userId);
+                sendMessage(sender, chatId, "❌ Игрок не найден.");
+                return;
+            }
+
+            // >>> ДОБАВЛЕНО: увеличение стека игрока
+            player.addMoney(amount);
+
+            sendMessage(sender, chatId,
+                    "✅ " + username + " додэпнул " + amount + "₽.");
+        }
+
+        pendingMoneyActions.remove(userId);
 
         updateGameMessage(sender, game);
 
@@ -167,7 +190,13 @@ public class GameService {
                     createButton("🚀 Начать игру", "START_GAME")
             ));
         } else {
-            // управление регистрацией после старта
+            // >>> ДОБАВЛЕНО: кнопка докупки после старта игры и при закрытой регистрации
+            if (!game.isRegistrationOpen()) {
+                keyboard.add(List.of(
+                        createButton("💸 Додэп", "REBUY")
+                ));
+            }
+
             if (game.isRegistrationOpen()) {
                 keyboard.add(List.of(
                         createButton("🔒 Закрыть регистрацию", "CLOSE_REG")
@@ -219,6 +248,42 @@ public class GameService {
         game.closeRegistration();
 
         updateGameMessage(sender, game);
+    }
+
+    // додэп
+    public void rebuyByButton(Update update, AbsSender sender) {
+
+        Long chatId = update.getCallbackQuery().getMessage().getChatId();
+        Long userId = update.getCallbackQuery().getFrom().getId();
+        String username = getUsername(update.getCallbackQuery().getFrom());
+
+        Game game = games.get(chatId);
+
+        if (game == null) {
+            sendMessage(sender, chatId, "❌ Игра не найдена.");
+            return;
+        }
+
+        if (!game.isStarted()) {
+            sendMessage(sender, chatId, "⛔ Додэп возможен только после начала игры.");
+            return;
+        }
+
+        if (game.isRegistrationOpen()) {
+            sendMessage(sender, chatId, "⛔ Додэп возможен только когда регистрация закрыта.");
+            return;
+        }
+
+        if (!game.hasPlayer(userId)) {
+            sendMessage(sender, chatId, "⛔ " + username + ", додэпнуть может только участник игры.");
+            return;
+        }
+
+        pendingMoneyActions.put(userId, new PendingMoneyAction(chatId, MoneyActionType.REBUY));
+
+        sendMessage(sender, chatId,
+                "💸 " + username + ", введи сумму додэпа (в рублях):");
+
     }
 
     // новая кнопка
@@ -307,4 +372,13 @@ public class GameService {
         }
 
     }
+
+    private enum MoneyActionType {
+        JOIN,
+        REBUY
+    }
+
+    private record PendingMoneyAction(Long chatId, MoneyActionType type) {
+    }
+
 }

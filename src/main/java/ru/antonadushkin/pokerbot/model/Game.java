@@ -42,13 +42,18 @@ public class Game {
         this.started = true;
     }
 
+
     public boolean hasPlayer(Long userId) {
+        return findPlayer(userId) != null;
+    }
+
+    public Player findPlayer(Long userId) {
         for (Player p : players) {
             if (p.getId().equals(userId)) {
-                return true;
+                return p;
             }
         }
-        return false;
+        return null;
     }
 
     public void addPlayer(Player player) {
