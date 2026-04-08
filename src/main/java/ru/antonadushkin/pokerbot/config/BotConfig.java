@@ -6,10 +6,10 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class BotConfig {
 
-    @Value("{telegram.bot.username}")
+    @Value("${telegram.bot.username}")
     private String username;
 
-    @Value("{telegram.bot.token}")
+    @Value("${telegram.bot.token}")
     private String token;
 
     public String getUsername() {
