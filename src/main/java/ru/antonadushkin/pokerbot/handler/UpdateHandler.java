@@ -40,6 +40,18 @@ public class UpdateHandler {
                     gameService.rebuyByButton(update, sender);
                     break;
 
+                case "END_GAME":
+                    gameService.endGameByButton(update, sender);
+                    break;
+
+                case "ENTER_FINAL_MONEY":
+                    gameService.enterFinalMoneyByButton(update, sender);
+                    break;
+
+                case "NEW_GAME":
+                    gameService.newGame(update, sender);
+                    break;
+
             }
 
             return;

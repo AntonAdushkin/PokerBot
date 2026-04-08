@@ -10,12 +10,15 @@ public class Game {
     private Long ownerId;
     private boolean started;
     private boolean registrationOpen;
+    private boolean finishing;
+    private boolean completed;
 
     public Game(Long chatId, Long ownerId) {
         this.chatId = chatId;
         this.ownerId = ownerId;
         this.started = false;
         this.registrationOpen = true;
+        this.finishing = false;
     }
 
     public Long getOwnerId() {
@@ -42,6 +45,21 @@ public class Game {
         this.started = true;
     }
 
+    public boolean isFinishing() {
+        return finishing;
+    }
+
+    public void startFinishing() {
+        this.finishing = true;
+    }
+
+    public boolean isCompleted() {
+        return completed;
+    }
+
+    public void complete() {
+        this.completed = true;
+    }
 
     public boolean hasPlayer(Long userId) {
         return findPlayer(userId) != null;
@@ -54,6 +72,32 @@ public class Game {
             }
         }
         return null;
+    }
+
+    public boolean allPlayersSubmittedFinalMoney() {
+        if (players.isEmpty()) {
+            return false;
+        }
+
+        for (Player player : players) {
+            if (!player.hasFinalMoney()) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public List<Player> getPlayersWithoutFinalMoney() {
+        List<Player> result = new ArrayList<>();
+
+        for (Player player : players) {
+            if (!player.hasFinalMoney()) {
+                result.add(player);
+            }
+        }
+
+        return result;
     }
 
     public void addPlayer(Player player) {

@@ -59,6 +59,33 @@ public class GameService {
 
     }
 
+    // новая игра
+    public void newGame(Update update, AbsSender sender) {
+
+        Long chatId = update.getCallbackQuery().getMessage().getChatId();
+        Long userId = update.getCallbackQuery().getFrom().getId();
+
+        Game oldGame = games.get(chatId);
+
+        if (oldGame == null) {
+            sendMessage(sender, chatId, "❌ Игра не найдена.");
+            return;
+        }
+
+        if (!oldGame.getOwnerId().equals(userId)) {
+            sendMessage(sender, chatId, "⛔ Только организатор может начать новую игру.");
+            return;
+        }
+
+        Game newGame = new Game(chatId, userId);
+
+        games.put(chatId, newGame);
+
+        sendMessage(sender, chatId, "🎮 Начата новая игра!");
+
+        updateGameMessage(sender, newGame);
+    }
+
     // присоединиться к игре по кнопке
     public void joinGameByButton(Update update, AbsSender sender) {
 
@@ -108,7 +135,9 @@ public class GameService {
 
         try {
             amount = Integer.parseInt(text);
-            if (amount <= 0) throw new NumberFormatException();
+            if (amount < 0) {
+                throw new NumberFormatException();
+            }
         } catch (Exception e) {
             String username = getUsername(update.getMessage().getFrom());
             sendMessage(sender, chatId, "❌ " + username + ", введи корректное число!");
@@ -125,9 +154,22 @@ public class GameService {
         }
 
         if (pendingMoneyAction.type() == MoneyActionType.JOIN) {
+            if (amount <= 0) {
+                sendMessage(sender, chatId, "❌ " + username + ", сумма входа должна быть больше 0.");
+                return;
+            }
+
             Player player = new Player(userId, username, amount);
             game.addPlayer(player);
-        } else {
+
+            sendMessage(sender, chatId,
+                    "✅ " + username + " вошёл в игру и дэпнул " + amount + "₽.");
+        } else if (pendingMoneyAction.type() == MoneyActionType.REBUY) {
+            if (amount <= 0) {
+                sendMessage(sender, chatId, "❌ " + username + ", сумма докупки должна быть больше 0.");
+                return;
+            }
+
             Player player = game.findPlayer(userId);
 
             if (player == null) {
@@ -136,17 +178,36 @@ public class GameService {
                 return;
             }
 
-            // >>> ДОБАВЛЕНО: увеличение стека игрока
             player.addMoney(amount);
 
             sendMessage(sender, chatId,
                     "✅ " + username + " додэпнул " + amount + "₽.");
+        } else if (pendingMoneyAction.type() == MoneyActionType.FINAL_MONEY) {
+            Player player = game.findPlayer(userId);
+
+            if (player == null) {
+                pendingMoneyActions.remove(userId);
+                sendMessage(sender, chatId, "❌ Игрок не найден.");
+                return;
+            }
+
+            player.setFinalMoney(amount);
+
+            sendMessage(sender, chatId,
+                    "✅ " + username + " указал остаток: " + amount + "₽.");
+
+            if (game.allPlayersSubmittedFinalMoney()) {
+                game.complete();
+                String settlementMessage = buildSettlementMessage(game);
+                sendMessage(sender, chatId, settlementMessage);
+            } else {
+                sendMessage(sender, chatId, buildWaitingForResultsMessage(game));
+            }
         }
 
         pendingMoneyActions.remove(userId);
 
         updateGameMessage(sender, game);
-
     }
 
     // кнопка начала игры и конца регистрации
@@ -163,12 +224,20 @@ public class GameService {
         }
 
         if (!game.getOwnerId().equals(userId)) {
-            sendMessage(sender, chatId, "⛔ Только создатель может начать игру.");
+            sendMessage(sender, chatId, "⛔ Только создатель игры может начать игру.");
             return;
         }
 
+        if (game.isStarted()) {
+            sendMessage(sender, chatId, "⚠️ Игра уже началась.");
+            return;
+        }
+
+        // >>> ВАЖНО: после старта регистрация автоматически закрывается
         game.start();
         game.closeRegistration();
+
+        sendMessage(sender, chatId, "🚀 Игра началась! Регистрация автоматически закрыта.");
 
         updateGameMessage(sender, game);
 
@@ -178,6 +247,18 @@ public class GameService {
     private InlineKeyboardMarkup buildKeyboard(Game game) {
 
         List<List<InlineKeyboardButton>> keyboard = new ArrayList<>();
+
+        if (game.isCompleted()) {
+
+            keyboard.add(List.of(
+                    createButton("🎮 Начать новую игру", "NEW_GAME")
+            ));
+
+            InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+            markup.setKeyboard(keyboard);
+
+            return markup;
+        }
 
         if (game.isRegistrationOpen()) {
             keyboard.add(List.of(
@@ -189,11 +270,15 @@ public class GameService {
             keyboard.add(List.of(
                     createButton("🚀 Начать игру", "START_GAME")
             ));
-        } else {
-            // >>> ДОБАВЛЕНО: кнопка докупки после старта игры и при закрытой регистрации
+        } else if (!game.isFinishing()) {
+
             if (!game.isRegistrationOpen()) {
                 keyboard.add(List.of(
                         createButton("💸 Додэп", "REBUY")
+                ));
+
+                keyboard.add(List.of(
+                        createButton("🏁 Закончить игру", "END_GAME")
                 ));
             }
 
@@ -206,6 +291,11 @@ public class GameService {
                         createButton("🔓 Открыть регистрацию", "OPEN_REG")
                 ));
             }
+
+        } else {
+            keyboard.add(List.of(
+                    createButton("💰 Ввести остаток", "ENTER_FINAL_MONEY")
+            ));
         }
 
         InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
@@ -284,6 +374,175 @@ public class GameService {
         sendMessage(sender, chatId,
                 "💸 " + username + ", введи сумму додэпа (в рублях):");
 
+    }
+
+    // конец игры
+    public void endGameByButton(Update update, AbsSender sender) {
+
+        Long chatId = update.getCallbackQuery().getMessage().getChatId();
+        Long userId = update.getCallbackQuery().getFrom().getId();
+
+        Game game = games.get(chatId);
+
+        if (game == null) {
+            sendMessage(sender, chatId, "❌ Игра не найдена.");
+            return;
+        }
+
+        if (!game.getOwnerId().equals(userId)) {
+            sendMessage(sender, chatId, "⛔ Только создатель игры может завершить игру.");
+            return;
+        }
+
+        if (!game.isStarted()) {
+            sendMessage(sender, chatId, "⛔ Игра ещё не началась.");
+            return;
+        }
+
+        if (game.isRegistrationOpen()) {
+            sendMessage(sender, chatId, "⛔ Сначала закрой регистрацию.");
+            return;
+        }
+
+        if (game.isFinishing()) {
+            sendMessage(sender, chatId, "⚠️ Игра уже находится в режиме завершения.");
+            return;
+        }
+
+        game.startFinishing();
+
+        sendMessage(sender, chatId,
+                "🏁 Игра завершена!\n\n" +
+                        "Теперь каждый участник должен нажать кнопку «💰 Ввести остаток» " +
+                        "и отправить сумму, которая у него осталась в конце игры.");
+
+        updateGameMessage(sender, game);
+
+    }
+
+    public void enterFinalMoneyByButton(Update update, AbsSender sender) {
+
+        Long chatId = update.getCallbackQuery().getMessage().getChatId();
+        Long userId = update.getCallbackQuery().getFrom().getId();
+        String username = getUsername(update.getCallbackQuery().getFrom());
+
+        Game game = games.get(chatId);
+
+        if (game == null) {
+            sendMessage(sender, chatId, "❌ Игра не найдена.");
+            return;
+        }
+
+        if (!game.isFinishing()) {
+            sendMessage(sender, chatId, "⛔ Сейчас игра не находится в режиме завершения.");
+            return;
+        }
+
+        if (!game.hasPlayer(userId)) {
+            sendMessage(sender, chatId, "⛔ " + username + ", только участник игры может ввести остаток.");
+            return;
+        }
+
+        pendingMoneyActions.put(userId, new PendingMoneyAction(chatId, MoneyActionType.FINAL_MONEY));
+
+        sendMessage(sender, chatId,
+                "💰 " + username + ", введи сумму, которая у тебя осталась в конце игры:");
+
+    }
+
+    private String buildSettlementMessage(Game game) {
+
+        int totalInvested = 0;
+        int totalFinal = 0;
+
+        for (Player player : game.getPlayers()) {
+            totalInvested += player.getMoney();
+            totalFinal += player.getFinalMoney();
+        }
+
+        if (totalInvested != totalFinal) {
+            return "❌ Невозможно посчитать переводы.\n\n" +
+                    "Сумма внесённых денег: " + totalInvested + "₽\n" +
+                    "Сумма итоговых остатков: " + totalFinal + "₽\n\n" +
+                    "Проверьте, правильно ли все участники ввели остатки.";
+        }
+
+        List<SettlementSide> creditors = new ArrayList<>();
+        List<SettlementSide> debtors = new ArrayList<>();
+
+        for (Player player : game.getPlayers()) {
+            int net = player.getFinalMoney() - player.getMoney();
+
+            if (net > 0) {
+                creditors.add(new SettlementSide(player.getUsername(), net));
+            } else if (net < 0) {
+                debtors.add(new SettlementSide(player.getUsername(), -net));
+            }
+        }
+
+        if (creditors.isEmpty() && debtors.isEmpty()) {
+            return "✅ Игра завершена.\n\nНикто никому ничего не должен.";
+        }
+
+        List<String> transfers = new ArrayList<>();
+
+        int debtorIndex = 0;
+        int creditorIndex = 0;
+
+        while (debtorIndex < debtors.size() && creditorIndex < creditors.size()) {
+            SettlementSide debtor = debtors.get(debtorIndex);
+            SettlementSide creditor = creditors.get(creditorIndex);
+
+            int transferAmount = Math.min(debtor.amount(), creditor.amount());
+
+            transfers.add("💸 " + debtor.username() + " → " + creditor.username() + ": " + transferAmount + "₽");
+
+            debtor = debtor.decrease(transferAmount);
+            creditor = creditor.decrease(transferAmount);
+
+            if (debtor.amount() == 0) {
+                debtorIndex++;
+            } else {
+                debtors.set(debtorIndex, debtor);
+            }
+
+            if (creditor.amount() == 0) {
+                creditorIndex++;
+            } else {
+                creditors.set(creditorIndex, creditor);
+            }
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("🏁 Игра завершена!\n\n");
+        sb.append("Итоговые переводы:\n\n");
+
+        for (String transfer : transfers) {
+            sb.append(transfer).append("\n");
+        }
+
+        sb.append("\nПереведите деньги согласно списку выше.\n");
+        sb.append("После завершения переводов можно начать новую игру.");
+
+        return sb.toString();
+    }
+
+    private String buildWaitingForResultsMessage(Game game) {
+
+        List<Player> playersWithoutFinalMoney = game.getPlayersWithoutFinalMoney();
+
+        if (playersWithoutFinalMoney.isEmpty()) {
+            return "✅ Все участники уже ввели остатки.";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("⏳ Ожидаем остатки от:\n");
+
+        for (Player player : playersWithoutFinalMoney) {
+            sb.append("• ").append(player.getUsername()).append("\n");
+        }
+
+        return sb.toString();
     }
 
     // новая кнопка
@@ -375,10 +634,17 @@ public class GameService {
 
     private enum MoneyActionType {
         JOIN,
-        REBUY
+        REBUY,
+        FINAL_MONEY
     }
 
     private record PendingMoneyAction(Long chatId, MoneyActionType type) {
+    }
+
+    private record SettlementSide(String username, int amount) {
+        private SettlementSide decrease(int value) {
+            return new SettlementSide(username, amount - value);
+        }
     }
 
 }
