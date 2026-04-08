@@ -16,26 +16,42 @@ public class UpdateHandler {
 
     public void handle(Update update, AbsSender sender) {
 
-        if (update.hasMessage() && update.getMessage().hasText()) {
-            String text = update.getMessage().getText();
-            Long chatId = update.getMessage().getChatId();
-
-            gameService.handleMoneyInput(update, sender);
-
-            if (text.equals("/startgame")) {
-                gameService.startGame(chatId, sender);
-                return;
-            }
-
-        }
-
         if (update.hasCallbackQuery()) {
             String data = update.getCallbackQuery().getData();
 
-            if (data.equals("JOIN_GAME")) {
-                gameService.joinGameByButton(update, sender);
+            switch (data) {
+                case "JOIN_GAME":
+                    gameService.joinGameByButton(update, sender);
+                    break;
+
+                case "START_GAME":
+                    gameService.startGameByButton(update, sender);
+                    break;
+
+                case "OPEN_REG":
+                    gameService.openRegistration(update, sender);
+                    break;
+
+                case "CLOSE_REG":
+                    gameService.closeRegistration(update, sender);
+                    break;
             }
 
+            return;
+        }
+
+        if (update.hasMessage() && update.getMessage().hasText()) {
+
+            Long chatId = update.getMessage().getChatId();
+            Long userId = update.getMessage().getFrom().getId();
+            String text = update.getMessage().getText();
+
+            gameService.handleMoneyInput(update, sender);
+
+            if ("/startgame".equals(text)) {
+                gameService.startGame(chatId, userId, sender);
+                return;
+            }
         }
 
     }

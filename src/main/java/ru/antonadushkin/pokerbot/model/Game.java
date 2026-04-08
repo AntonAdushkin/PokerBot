@@ -7,9 +7,39 @@ public class Game {
 
     private Long chatId;
     private List<Player> players = new ArrayList<>();
+    private Long ownerId;
+    private boolean started;
+    private boolean registrationOpen;
 
-    public Game(Long chatId) {
+    public Game(Long chatId, Long ownerId) {
         this.chatId = chatId;
+        this.ownerId = ownerId;
+        this.started = false;
+        this.registrationOpen = true;
+    }
+
+    public Long getOwnerId() {
+        return ownerId;
+    }
+
+    public boolean isStarted() {
+        return started;
+    }
+
+    public boolean isRegistrationOpen() {
+        return registrationOpen;
+    }
+
+    public void openRegistration() {
+        this.registrationOpen = true;
+    }
+
+    public void closeRegistration() {
+        this.registrationOpen = false;
+    }
+
+    public void start() {
+        this.started = true;
     }
 
     public boolean hasPlayer(Long userId) {
