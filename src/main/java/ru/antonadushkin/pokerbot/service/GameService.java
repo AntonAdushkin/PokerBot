@@ -757,13 +757,14 @@ public class GameService {
     // текст сообщения
     private String buildGameMessage(Game game) {
         StringBuilder sb = new StringBuilder();
+        sb.append("♠️♥️ ПОКЕР ♣️♦️\n\n");
 
         if (game.isCompleted()) {
             sb.append("🏁 Игра окончена!\n\n");
         } else if (game.isFinishing()) {
             sb.append("⏳ Идёт ввод итоговых остатков.\n\n");
         } else if (game.isStarted()) {
-            sb.append("♠️ Игра идёт.\n\n");
+            sb.append("🃏️ Игра идёт.\n\n");
         } else {
             sb.append("📝 Идёт регистрация.\n\n");
         }
