@@ -327,9 +327,12 @@ public class GameService {
         }
 
         if (!game.isStarted()) {
-            keyboard.add(List.of(
-                    createButton("🚀 Начать игру", "START_GAME")
-            ));
+            if (game.getPlayers().size() >= 2) {
+                keyboard.add(List.of(
+                        createButton("🚀 Начать игру", "START_GAME")
+                ));
+            }
+
         } else if (!game.isFinishing()) {
 
             if (!game.isRegistrationOpen()) {
@@ -376,6 +379,26 @@ public class GameService {
 
         Game game = games.get(chatId);
 
+        if (game == null) {
+            sendMessage(sender, chatId, "❌ Игра не найдена.");
+            return;
+        }
+
+        if (!game.isStarted()) {
+            sendMessage(sender, chatId, "⛔ Регистрацией можно управлять только после начала игры.");
+            return;
+        }
+
+        if (game.isFinishing()) {
+            sendMessage(sender, chatId, "⛔ Нельзя менять регистрацию во время завершения игры.");
+            return;
+        }
+
+        if (game.isCompleted()) {
+            sendMessage(sender, chatId, "⛔ Игра уже завершена.");
+            return;
+        }
+
         if (!game.getOwnerId().equals(userId)) {
             sendMessage(sender, chatId, "⛔ Только владелец может открыть регистрацию");
             return;
@@ -393,6 +416,26 @@ public class GameService {
         Long userId = update.getCallbackQuery().getFrom().getId();
 
         Game game = games.get(chatId);
+
+        if (game == null) {
+            sendMessage(sender, chatId, "❌ Игра не найдена.");
+            return;
+        }
+
+        if (!game.isStarted()) {
+            sendMessage(sender, chatId, "⛔ Регистрацией можно управлять только после начала игры.");
+            return;
+        }
+
+        if (game.isFinishing()) {
+            sendMessage(sender, chatId, "⛔ Нельзя менять регистрацию во время завершения игры.");
+            return;
+        }
+
+        if (game.isCompleted()) {
+            sendMessage(sender, chatId, "⛔ Игра уже завершена.");
+            return;
+        }
 
         if (!game.getOwnerId().equals(userId)) {
             sendMessage(sender, chatId, "⛔ Только владелец может закрыть регистрацию.");
