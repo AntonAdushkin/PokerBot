@@ -69,10 +69,12 @@ public class UpdateHandler {
 
             gameService.handleMoneyInput(update, sender);
 
-            if ("/startgame".equals(text)) {
+            String command = text.split("@")[0];
+
+            if ("/startgame".equals(command)) {
                 gameService.startGame(chatId, userId, sender);
-                return;
             }
+
         }
 
     }
