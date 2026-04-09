@@ -59,6 +59,7 @@ public class Game {
 
     public void complete() {
         this.completed = true;
+        this.finishing = false;
     }
 
     public boolean hasPlayer(Long userId) {
