@@ -155,9 +155,8 @@ public class GameService {
         }
 
         if (pendingMoneyAction.type() == MoneyActionType.JOIN) {
-
             if (amount <= 0) {
-                sendMessage(sender, chatId, "❌ " + username + ", сумма дэпа должна быть больше 0.");
+                sendMessage(sender, chatId, "❌ " + username + ", сумма входа должна быть больше 0.");
                 return;
             }
 
@@ -170,11 +169,9 @@ public class GameService {
             pendingMoneyActions.remove(userId);
             updateGameMessage(sender, game);
             return;
-
         }
 
         if (pendingMoneyAction.type() == MoneyActionType.REBUY) {
-
             if (amount <= 0) {
                 sendMessage(sender, chatId, "❌ " + username + ", сумма додэпа должна быть больше 0.");
                 return;
@@ -188,6 +185,12 @@ public class GameService {
                 return;
             }
 
+            if (player.isLeftGame()) {
+                pendingMoneyActions.remove(userId);
+                sendMessage(sender, chatId, "⛔ " + username + ", ты уже вышел из игры и не можешь додэпать.");
+                return;
+            }
+
             player.addMoney(amount);
 
             sendMessage(sender, chatId,
@@ -195,13 +198,30 @@ public class GameService {
 
             pendingMoneyActions.remove(userId);
             updateGameMessage(sender, game);
-
             return;
+        }
 
+        if (pendingMoneyAction.type() == MoneyActionType.LEAVE_FINAL_MONEY) {
+            Player player = game.findPlayer(userId);
+
+            if (player == null) {
+                pendingMoneyActions.remove(userId);
+                sendMessage(sender, chatId, "❌ Игрок не найден.");
+                return;
+            }
+
+            player.setFinalMoney(amount);
+            player.leaveGame();
+
+            sendMessage(sender, chatId,
+                    "🚪 " + username + " вышел из игры с остатком " + amount + "₽.");
+
+            pendingMoneyActions.remove(userId);
+            updateGameMessage(sender, game);
+            return;
         }
 
         if (pendingMoneyAction.type() == MoneyActionType.FINAL_MONEY) {
-
             Player player = game.findPlayer(userId);
 
             if (player == null) {
@@ -218,11 +238,24 @@ public class GameService {
             pendingMoneyActions.remove(userId);
 
             if (game.allPlayersSubmittedFinalMoney()) {
-                game.complete();
-                String settlementMessage = buildSettlementMessage(game);
-                sendMessage(sender, chatId, settlementMessage);
-                updateGameMessage(sender, game);
-                unpinGameMessage(sender, chatId);
+                SettlementResult settlementResult = buildSettlementResult(game);
+
+                if (settlementResult.success()) {
+                    game.complete();
+
+                    sendMessage(sender, chatId, settlementResult.message());
+                    updateGameMessage(sender, game);
+                    unpinGameMessage(sender, chatId);
+                } else {
+
+                    game.resetFinishing();
+
+                    sendMessage(sender, chatId, settlementResult.message());
+                    sendMessage(sender, chatId,
+                            "🔁 Остатки введены некорректно. Пожалуйста, все активные участники снова нажмите «💰 Ввести остаток» и введите суммы заново.");
+
+                    updateGameMessage(sender, game);
+                }
             } else {
                 sendMessage(sender, chatId, buildWaitingForResultsMessage(game));
                 updateGameMessage(sender, game);
@@ -302,6 +335,10 @@ public class GameService {
             if (!game.isRegistrationOpen()) {
                 keyboard.add(List.of(
                         createButton("💸 Додэп", "REBUY")
+                ));
+
+                keyboard.add(List.of(
+                        createButton("🚪 Выйти из игры", "LEAVE_GAME")
                 ));
 
                 keyboard.add(List.of(
@@ -465,8 +502,16 @@ public class GameService {
             return;
         }
 
-        if (!game.hasPlayer(userId)) {
+        Player player = game.findPlayer(userId);
+
+        if (player == null) {
             sendMessage(sender, chatId, "⛔ " + username + ", только участник игры может ввести остаток.");
+            return;
+        }
+
+        if (player.isLeftGame()) {
+            sendMessage(sender, chatId,
+                    "⚠️ " + username + ", ты уже вышел из игры ранее. Твой остаток уже сохранён.");
             return;
         }
 
@@ -477,7 +522,53 @@ public class GameService {
 
     }
 
-    private String buildSettlementMessage(Game game) {
+    public void leaveGameByButton(Update update, AbsSender sender) {
+
+        Long chatId = update.getCallbackQuery().getMessage().getChatId();
+        Long userId = update.getCallbackQuery().getFrom().getId();
+        String username = getUsername(update.getCallbackQuery().getFrom());
+
+        Game game = games.get(chatId);
+
+        if (game == null) {
+            sendMessage(sender, chatId, "❌ Игра не найдена.");
+            return;
+        }
+
+        if (!game.isStarted()) {
+            sendMessage(sender, chatId, "⛔ Выйти из игры можно только после её начала.");
+            return;
+        }
+
+        if (game.isFinishing()) {
+            sendMessage(sender, chatId, "⛔ Сейчас уже идёт завершение игры, используй ввод итогового остатка.");
+            return;
+        }
+
+        if (game.isCompleted()) {
+            sendMessage(sender, chatId, "⛔ Игра уже завершена.");
+            return;
+        }
+
+        Player player = game.findPlayer(userId);
+
+        if (player == null) {
+            sendMessage(sender, chatId, "⛔ " + username + ", ты не участвуешь в этой игре.");
+            return;
+        }
+
+        if (player.isLeftGame()) {
+            sendMessage(sender, chatId, "⚠️ " + username + ", ты уже вышел из игры.");
+            return;
+        }
+
+        pendingMoneyActions.put(userId, new PendingMoneyAction(chatId, MoneyActionType.LEAVE_FINAL_MONEY));
+
+        sendMessage(sender, chatId,
+                "🚪 " + username + ", введи сумму, которая у тебя осталась на момент выхода из игры:");
+    }
+
+    private SettlementResult buildSettlementResult(Game game) {
 
         int totalInvested = 0;
         int totalFinal = 0;
@@ -488,10 +579,13 @@ public class GameService {
         }
 
         if (totalInvested != totalFinal) {
-            return "❌ Невозможно посчитать переводы.\n\n" +
-                    "Сумма внесённых денег: " + totalInvested + "₽\n" +
-                    "Сумма итоговых остатков: " + totalFinal + "₽\n\n" +
-                    "Проверьте, правильно ли все участники ввели остатки.";
+            return new SettlementResult(
+                    false,
+                    "❌ Невозможно посчитать переводы.\n\n" +
+                            "Сумма внесённых денег: " + totalInvested + "₽\n" +
+                            "Сумма итоговых остатков: " + totalFinal + "₽\n\n" +
+                            "Проверьте введённые остатки и введите их заново."
+            );
         }
 
         List<SettlementSide> creditors = new ArrayList<>();
@@ -508,7 +602,12 @@ public class GameService {
         }
 
         if (creditors.isEmpty() && debtors.isEmpty()) {
-            return "✅ Игра завершена.\n\nНикто никому ничего не должен.";
+            return new SettlementResult(
+                    true,
+                    "🏁 Игра завершена!\n\n" +
+                            "Никто никому ничего не должен.\n\n" +
+                            "✅ Игра окончена. Можно начинать новую."
+            );
         }
 
         List<String> transfers = new ArrayList<>();
@@ -548,10 +647,11 @@ public class GameService {
             sb.append(transfer).append("\n");
         }
 
-        sb.append("\nПереведите деньги согласно списку выше.\n");
-        sb.append("После завершения переводов можно начать новую игру.");
+        sb.append("\nПереведите деньги согласно списку выше.");
+        sb.append("\n✅ После этого игра считается завершённой.");
 
-        return sb.toString();
+        return new SettlementResult(true, sb.toString());
+
     }
 
     private String buildWaitingForResultsMessage(Game game) {
@@ -614,14 +714,13 @@ public class GameService {
     // текст сообщения
     private String buildGameMessage(Game game) {
         StringBuilder sb = new StringBuilder();
-        sb.append("♠️♥️ ПОКЕР ♣️♦️\n\n");
 
         if (game.isCompleted()) {
             sb.append("🏁 Игра окончена!\n\n");
         } else if (game.isFinishing()) {
             sb.append("⏳ Идёт ввод итоговых остатков.\n\n");
         } else if (game.isStarted()) {
-            sb.append("🃏️ Игра идёт.\n\n");
+            sb.append("♠️ Игра идёт.\n\n");
         } else {
             sb.append("📝 Идёт регистрация.\n\n");
         }
@@ -632,13 +731,20 @@ public class GameService {
             sb.append("— пока никто не присоединился.\n");
         } else {
             for (Player player : game.getPlayers()) {
-                sb.append("• ").append(player.getUsername())
-                        .append(" — внесено: ").append(player.getMoney()).append("₽.");
+                sb.append("• ")
+                        .append(player.getUsername())
+                        .append(" — внесено: ")
+                        .append(player.getMoney())
+                        .append("₽");
 
-                if (game.isFinishing() || game.isCompleted()) {
+                if (player.isLeftGame()) {
+                    sb.append(" (вышел из игры)");
+                }
+
+                if (game.isFinishing() || game.isCompleted() || player.isLeftGame()) {
                     sb.append(", остаток: ");
                     if (player.getFinalMoney() != null) {
-                        sb.append(player.getFinalMoney()).append("₽.");
+                        sb.append(player.getFinalMoney()).append("₽");
                     } else {
                         sb.append("—");
                     }
@@ -651,7 +757,9 @@ public class GameService {
         sb.append("\nОбщий банк: ").append(game.getTotalBank()).append("₽.");
 
         if (game.isCompleted()) {
-            sb.append("\n\n✅ Игра завершена. Остаётся только выполнить переводы по итоговому сообщению.");
+            sb.append("\n\n✅ Игра завершена. Главное сообщение больше не активно.");
+        } else if (game.isFinishing()) {
+            sb.append("\n\nℹ️ Игроки, которые вышли из игры досрочно, уже имеют сохранённый остаток.");
         }
 
         return sb.toString();
@@ -718,10 +826,14 @@ public class GameService {
     private enum MoneyActionType {
         JOIN,
         REBUY,
-        FINAL_MONEY
+        FINAL_MONEY,
+        LEAVE_FINAL_MONEY
     }
 
     private record PendingMoneyAction(Long chatId, MoneyActionType type) {
+    }
+
+    private record SettlementResult(boolean success, String message) {
     }
 
     private record SettlementSide(String username, int amount) {

@@ -6,6 +6,7 @@ public class Player {
     private String username;
     private int money;
     private Integer finalMoney;
+    private boolean leftGame;
 
     public Player(Long id, String username, int money) {
         this.id = id;
@@ -39,6 +40,14 @@ public class Player {
 
     public void addMoney(int amount) {
         this.money += amount;
+    }
+
+    public boolean isLeftGame() {
+        return leftGame;
+    }
+
+    public void leaveGame() {
+        this.leftGame = true;
     }
 
 }

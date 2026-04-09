@@ -48,6 +48,10 @@ public class UpdateHandler {
                     gameService.enterFinalMoneyByButton(update, sender);
                     break;
 
+                case "LEAVE_GAME":
+                    gameService.leaveGameByButton(update, sender);
+                    break;
+
                 case "NEW_GAME":
                     gameService.newGame(update, sender);
                     break;

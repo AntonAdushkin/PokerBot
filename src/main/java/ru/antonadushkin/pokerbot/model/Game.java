@@ -62,6 +62,16 @@ public class Game {
         this.finishing = false;
     }
 
+    public void resetFinishing() {
+        this.finishing = true;
+        this.completed = false;
+        for (Player player : players) {
+            if (!player.isLeftGame()) {
+                player.setFinalMoney(null);
+            }
+        }
+    }
+
     public boolean hasPlayer(Long userId) {
         return findPlayer(userId) != null;
     }
